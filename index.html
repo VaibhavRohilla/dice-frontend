@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jhandi Munda</title>
+    <link rel="icon" type="image/svg+xml" href="/vite.svg">
+    
+    <!-- Critical CSS - Prevents white flash -->
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            background: url('/woodtexture.png') center center / cover no-repeat;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        .loading-screen {
+            position: fixed;
+            inset: 0;
+            background: url('/woodtexture.png') center center / cover no-repeat;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        .loading-content { text-align: center; color: #fff; }
+        .loading-dice {
+            width: 80px; height: 80px;
+            margin: 0 auto 30px;
+            position: relative;
+            transform-style: preserve-3d;
+            animation: rotateDice 2s infinite ease-in-out;
+        }
+        .dice-face {
+            position: absolute;
+            width: 80px; height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            backface-visibility: hidden;
+        }
+        .dice-face.front  { transform: rotateY(0deg) translateZ(40px); }
+        .dice-face.back   { transform: rotateY(180deg) translateZ(40px); }
+        .dice-face.right  { transform: rotateY(90deg) translateZ(40px); }
+        .dice-face.left   { transform: rotateY(-90deg) translateZ(40px); }
+        .dice-face.top    { transform: rotateX(90deg) translateZ(40px); }
+        .dice-face.bottom { transform: rotateX(-90deg) translateZ(40px); }
+        @keyframes rotateDice {
+            0%   { transform: rotateX(0deg) rotateY(0deg); }
+            25%  { transform: rotateX(90deg) rotateY(90deg); }
+            50%  { transform: rotateX(180deg) rotateY(180deg); }
+            75%  { transform: rotateX(270deg) rotateY(270deg); }
+            100% { transform: rotateX(360deg) rotateY(360deg); }
+        }
+        .loading-title {
+            font-family: system-ui, -apple-system, sans-serif;
+            font-size: 2rem; font-weight: 800;
+            margin-bottom: 25px;
+            text-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+        .loading-bar {
+            width: 200px; height: 6px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+            margin: 0 auto 20px;
+            overflow: hidden;
+        }
+        .loading-progress {
+            width: 30%; height: 100%;
+            background: linear-gradient(90deg, #4ade80, #22c55e, #4ade80);
+            background-size: 200% 100%;
+            border-radius: 3px;
+            animation: loadingBar 1.5s ease-in-out infinite, shimmer 1.5s ease-in-out infinite;
+        }
+        @keyframes loadingBar {
+            0% { width: 10%; } 50% { width: 70%; } 100% { width: 100%; }
+        }
+        @keyframes shimmer {
+            0% { background-position: 200% 0; } 100% { background-position: -200% 0; }
+        }
+        .loading-text {
+            font-family: system-ui, -apple-system, sans-serif;
+            font-size: 1rem;
+            color: rgba(255, 255, 255, 0.7);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.7; } 50% { opacity: 1; }
+        }
+        /* Hide game content until loaded */
+        .game-overlay, .result-overlay, .header, #dice-canvas {
+            opacity: 0;
+            visibility: hidden;
+        }
+        /* Clock placeholder styles */
+        .clock-container {
+            position: absolute;
+            right: 30px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Loading Screen -->
+    <div class="loading-screen" id="loadingScreen">
+        <div class="loading-content">
+            <div class="loading-dice">
+                <div class="dice-face front">🎲</div>
+                <div class="dice-face back">🎲</div>
+                <div class="dice-face right">🎲</div>
+                <div class="dice-face left">🎲</div>
+                <div class="dice-face top">🎲</div>
+                <div class="dice-face bottom">🎲</div>
+            </div>
+            <h2 class="loading-title">Jhandi Munda</h2>
+            <div class="loading-bar">
+                <div class="loading-progress"></div>
+            </div>
+            <p class="loading-text">Loading game...</p>
+        </div>
+    </div>
+
+    <!-- Game Overlay - Countdown -->
+    <div class="game-overlay" id="gameOverlay">
+        <div class="overlay-content">
+            <h2 class="round-label">Starting Round</h2>
+            
+            <!-- Circular Countdown -->
+            <div class="countdown-container">
+                <svg class="countdown-svg" viewBox="0 0 100 100">
+                    <circle class="countdown-bg" cx="50" cy="50" r="45"></circle>
+                    <circle class="countdown-progress" id="countdownProgress" cx="50" cy="50" r="45"></circle>
+                </svg>
+                <div class="countdown-text" id="countdownText">10</div>
+            </div>
+            
+            <p class="status-text" id="statusText">Get ready...</p>
+        </div>
+    </div>
+    
+    <!-- Result Overlay -->
+    <div class="result-overlay" id="resultOverlay">
+        <div class="result-content">
+            <h2 class="result-label">Round Result</h2>
+            <div class="result-symbols" id="resultSymbols"></div>
+            <p class="next-round-text" id="nextRoundText">Next round in 5s</p>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <div class="header">
+        <div class="connection-status disconnected" id="connectionStatus">Connecting...</div>
+        <h1 class="title">🎲 Jhandi Munda</h1>
+        <div class="clock-container" id="clockContainer">
+            <div class="clock-time" id="clockTime">00:00</div>
+        </div>
+    </div>
+    
+    <canvas id="dice-canvas"></canvas>
+
+    <!-- Vite Entry Point -->
+    <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>

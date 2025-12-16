@@ -1,0 +1,509 @@
+/*
+    Jhandi Munda - Game Styles
+    Vite + Three.js Project
+*/
+
+/* Bricolage Grotesque Font Import */
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;700;800&display=swap');
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/*
+    Loading Screen
+*/
+.loading-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: url('/woodtexture.png') center center / cover no-repeat;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    opacity: 1;
+    transition: opacity 0.6s ease, visibility 0.6s ease;
+}
+
+.loading-screen.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.loading-content {
+    text-align: center;
+    color: #fff;
+}
+
+.loading-dice {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 30px;
+    position: relative;
+    transform-style: preserve-3d;
+    animation: rotateDice 2s infinite ease-in-out;
+}
+
+.dice-face {
+    position: absolute;
+    width: 80px;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 3rem;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 12px;
+    box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.1);
+    backface-visibility: hidden;
+}
+
+.dice-face.front  { transform: rotateY(0deg) translateZ(40px); }
+.dice-face.back   { transform: rotateY(180deg) translateZ(40px); }
+.dice-face.right  { transform: rotateY(90deg) translateZ(40px); }
+.dice-face.left   { transform: rotateY(-90deg) translateZ(40px); }
+.dice-face.top    { transform: rotateX(90deg) translateZ(40px); }
+.dice-face.bottom { transform: rotateX(-90deg) translateZ(40px); }
+
+@keyframes rotateDice {
+    0% {
+        transform: rotateX(0deg) rotateY(0deg);
+    }
+    25% {
+        transform: rotateX(90deg) rotateY(90deg);
+    }
+    50% {
+        transform: rotateX(180deg) rotateY(180deg);
+    }
+    75% {
+        transform: rotateX(270deg) rotateY(270deg);
+    }
+    100% {
+        transform: rotateX(360deg) rotateY(360deg);
+    }
+}
+
+.loading-title {
+    font-size: clamp(1.8rem, 5vw, 2.5rem);
+    font-weight: 800;
+    color: #fff;
+    margin-bottom: 25px;
+    text-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    letter-spacing: 2px;
+}
+
+.loading-bar {
+    width: 200px;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    margin: 0 auto 20px;
+    overflow: hidden;
+}
+
+.loading-progress {
+    width: 30%;
+    height: 100%;
+    background: linear-gradient(90deg, #4ade80, #22c55e, #4ade80);
+    background-size: 200% 100%;
+    border-radius: 3px;
+    animation: loadingBar 1.5s ease-in-out infinite, shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes loadingBar {
+    0% { width: 10%; }
+    50% { width: 70%; }
+    100% { width: 100%; }
+}
+
+@keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+.loading-text {
+    font-size: 1rem;
+    color: rgba(255, 255, 255, 0.7);
+    letter-spacing: 1px;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    font-family: 'Bricolage Grotesque', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: url('/woodtexture.png') center center / cover no-repeat;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+#dice-canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    opacity: 1;
+    visibility: visible;
+}
+
+/*
+    Header
+*/
+.header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px 30px;
+    pointer-events: none;
+    z-index: 10;
+    opacity: 1;
+    visibility: visible;
+}
+
+.title {
+    font-size: clamp(1.5rem, 4vw, 2.2rem);
+    font-weight: 700;
+    color: #FFFFFF;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/*
+    Clock - Bhutan Time
+*/
+.clock-container {
+    position: absolute;
+    right: 30px;
+    top: 50%;
+    transform: translateY(-50%);
+    text-align: center;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    padding: 12px 20px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.clock-time {
+    font-size: clamp(1.4rem, 3vw, 1.8rem);
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    letter-spacing: 2px;
+    font-variant-numeric: tabular-nums;
+}
+
+/*
+    Connection Status
+*/
+.connection-status {
+    position: absolute;
+    left: 30px;
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.connection-status.connected {
+    background: rgba(34, 197, 94, 0.2);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    color: #4ade80;
+}
+
+.connection-status.connected::before {
+    content: '●';
+    margin-right: 6px;
+    animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.connection-status.disconnected {
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #f87171;
+}
+
+.connection-status.disconnected::before {
+    content: '○';
+    margin-right: 6px;
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/*
+    Game Overlay - Countdown
+*/
+.game-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+
+.game-overlay.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.overlay-content {
+    text-align: center;
+    color: #fff;
+}
+
+.round-label {
+    font-size: clamp(1.5rem, 4vw, 2.2rem);
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 30px;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+}
+
+/*
+    Circular Countdown - Smooth animation
+*/
+.countdown-container {
+    position: relative;
+    width: 180px;
+    height: 180px;
+    margin: 0 auto 30px;
+}
+
+.countdown-svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.countdown-bg {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.15);
+    stroke-width: 6;
+}
+
+.countdown-progress {
+    fill: none;
+    stroke: #4ade80;
+    stroke-width: 6;
+    stroke-linecap: round;
+    stroke-dasharray: 283;
+    stroke-dashoffset: 0;
+    /* Smooth transition handled by JS with requestAnimationFrame */
+}
+
+.countdown-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 4rem;
+    font-weight: 800;
+    color: #fff;
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+}
+
+.status-text {
+    font-size: 1.1rem;
+    color: rgba(255, 255, 255, 0.7);
+    letter-spacing: 1px;
+}
+
+/*
+    Result Overlay
+*/
+.result-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+
+.result-overlay.visible {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+.result-content {
+    text-align: center;
+    color: #fff;
+}
+
+.result-label {
+    font-size: clamp(1.5rem, 4vw, 2rem);
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 25px;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+}
+
+.result-symbols {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 30px;
+}
+
+.result-symbol {
+    width: 80px;
+    height: 80px;
+    background: #fff;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 3rem;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+    animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) backwards;
+}
+
+.result-symbol:nth-child(1) { animation-delay: 0.1s; }
+.result-symbol:nth-child(2) { animation-delay: 0.15s; }
+.result-symbol:nth-child(3) { animation-delay: 0.2s; }
+.result-symbol:nth-child(4) { animation-delay: 0.25s; }
+.result-symbol:nth-child(5) { animation-delay: 0.3s; }
+.result-symbol:nth-child(6) { animation-delay: 0.35s; }
+
+@keyframes popIn {
+    from {
+        transform: scale(0) rotate(-10deg);
+        opacity: 0;
+    }
+    to {
+        transform: scale(1) rotate(0deg);
+        opacity: 1;
+    }
+}
+
+.next-round-text {
+    font-size: 1rem;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+/*
+    Responsive
+*/
+@media (max-width: 600px) {
+    .header {
+        flex-direction: column;
+        padding: 12px 20px;
+        gap: 8px;
+    }
+    
+    .title {
+        font-size: 1.3rem;
+    }
+    
+    .clock-container {
+        position: static;
+        transform: none;
+        padding: 6px 14px;
+        border-radius: 8px;
+    }
+    
+    .clock-time {
+        font-size: 0.9rem;
+        letter-spacing: 1px;
+    }
+    
+    .connection-status {
+        position: static;
+        transform: none;
+        order: -1;
+        padding: 4px 12px;
+        font-size: 0.75rem;
+        border-radius: 12px;
+    }
+    
+    .countdown-container {
+        width: 140px;
+        height: 140px;
+    }
+    
+    .countdown-text {
+        font-size: 3rem;
+    }
+    
+    .result-symbol {
+        width: 60px;
+        height: 60px;
+        font-size: 2.2rem;
+        border-radius: 12px;
+    }
+    
+    .result-symbols {
+        gap: 10px;
+    }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+    .countdown-container {
+        width: 110px;
+        height: 110px;
+        margin-bottom: 20px;
+    }
+    
+    .countdown-text {
+        font-size: 2.5rem;
+    }
+    
+    .round-label {
+        font-size: 1.3rem;
+        margin-bottom: 15px;
+    }
+    
+    .result-symbol {
+        width: 50px;
+        height: 50px;
+        font-size: 1.8rem;
+    }
+}
+
