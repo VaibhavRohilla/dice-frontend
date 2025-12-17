@@ -519,6 +519,9 @@ function startRolling(diceValues: number[]): void {
 function showLastOutcome(diceValues: number[]): void {
   gameState = 'result';
   
+  // Hide countdown timer overlay - only show it when a new game starts
+  gameOverlay.classList.add('hidden');
+  
   // Build result symbols
   buildResultSymbols(diceValues);
   
