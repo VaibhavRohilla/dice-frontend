@@ -49,6 +49,23 @@
             object-fit: contain;
             padding: 8px;
         }
+        .dice-number {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            width: 18px;
+            height: 18px;
+            background: rgba(0, 0, 0, 0.75);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: system-ui, -apple-system, sans-serif;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
         .dice-face.front  { transform: rotateY(0deg) translateZ(40px); }
         .dice-face.back   { transform: rotateY(180deg) translateZ(40px); }
         .dice-face.right  { transform: rotateY(90deg) translateZ(40px); }
@@ -115,12 +132,12 @@
     <div class="loading-screen" id="loadingScreen">
         <div class="loading-content">
             <div class="loading-dice">
-                <div class="dice-face front"><img src="/Dice_side_1.0.png" alt="Dice 1"></div>
-                <div class="dice-face back"><img src="/Dice_side_6.0.png" alt="Dice 6"></div>
-                <div class="dice-face right"><img src="/Dice_side_4.0.png" alt="Dice 4"></div>
-                <div class="dice-face left"><img src="/Dice_side_3.0.png" alt="Dice 3"></div>
-                <div class="dice-face top"><img src="/Dice_side_2.0.png" alt="Dice 2"></div>
-                <div class="dice-face bottom"><img src="/Dice_side_5.0.png" alt="Dice 5"></div>
+                <div class="dice-face front"><img src="/Dice_side_1.0.png" alt="Dice 1"><span class="dice-number">1</span></div>
+                <div class="dice-face back"><img src="/Dice_side_6.0.png" alt="Dice 6"><span class="dice-number">6</span></div>
+                <div class="dice-face right"><img src="/Dice_side_4.0.png" alt="Dice 4"><span class="dice-number">4</span></div>
+                <div class="dice-face left"><img src="/Dice_side_3.0.png" alt="Dice 3"><span class="dice-number">3</span></div>
+                <div class="dice-face top"><img src="/Dice_side_2.0.png" alt="Dice 2"><span class="dice-number">2</span></div>
+                <div class="dice-face bottom"><img src="/Dice_side_5.0.png" alt="Dice 5"><span class="dice-number">5</span></div>
             </div>
             <h2 class="loading-title">Jhandi Munda</h2>
             <div class="loading-bar">

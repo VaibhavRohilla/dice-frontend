@@ -71,6 +71,25 @@
     padding: 8px;
 }
 
+.dice-number {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 18px;
+    height: 18px;
+    background: rgba(0, 0, 0, 0.75);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Bricolage Grotesque', system-ui, -apple-system, sans-serif;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    z-index: 1;
+}
+
 .dice-face.front  { transform: rotateY(0deg) translateZ(40px); }
 .dice-face.back   { transform: rotateY(180deg) translateZ(40px); }
 .dice-face.right  { transform: rotateY(90deg) translateZ(40px); }
@@ -405,6 +424,7 @@ body {
 }
 
 .result-symbol {
+    position: relative;
     width: 80px;
     height: 80px;
     background: #fff;
@@ -415,7 +435,26 @@ body {
     font-size: 3rem;
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
     animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) backwards;
-    overflow: hidden;
+    overflow: visible;
+}
+
+.result-symbol-number {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 22px;
+    height: 22px;
+    background: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Bricolage Grotesque', system-ui, -apple-system, sans-serif;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    border: 2px solid #fff;
 }
 
 .result-symbol-img {
@@ -499,6 +538,14 @@ body {
         border-radius: 12px;
     }
     
+    .result-symbol-number {
+        width: 18px;
+        height: 18px;
+        font-size: 11px;
+        top: -4px;
+        right: -4px;
+    }
+    
     .result-symbols {
         gap: 10px;
     }
@@ -524,6 +571,14 @@ body {
         width: 50px;
         height: 50px;
         font-size: 1.8rem;
+    }
+    
+    .result-symbol-number {
+        width: 16px;
+        height: 16px;
+        font-size: 10px;
+        top: -4px;
+        right: -4px;
     }
 }
 

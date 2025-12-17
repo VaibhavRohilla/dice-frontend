@@ -571,6 +571,12 @@ function buildResultSymbols(diceValues: number[]): void {
       img.className = 'result-symbol-img';
       div.appendChild(img);
       
+      // Add number badge
+      const badge = document.createElement('span');
+      badge.className = 'result-symbol-number';
+      badge.textContent = String(value);
+      div.appendChild(badge);
+      
       resultSymbols.appendChild(div);
     }
   }
@@ -755,8 +761,62 @@ async function init(): Promise<void> {
   }
 }
 
-function getDiceTexture(faceValue: number): THREE.Texture | null {
-  return diceTextures.get(faceValue) || null;
+
+
+// Create a texture with number badge overlay
+function createTextureWithNumber(baseTexture: THREE.Texture, number: number): THREE.Texture {
+  const size = 512; // Canvas size
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  
+  // Fill with white background first
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, size, size);
+  
+  // Draw the base texture
+  if (baseTexture.image) {
+    ctx.drawImage(baseTexture.image, 0, 0, size, size);
+  }
+  
+  // Draw number badge in top-right corner
+  const badgeSize = 60;
+  const badgeX = size - badgeSize - 20;
+  const badgeY = 20;
+  
+  // Badge background
+  ctx.beginPath();
+  ctx.arc(badgeX + badgeSize / 2, badgeY + badgeSize / 2, badgeSize / 2, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+  ctx.fill();
+  
+  // Badge border
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  
+  // Badge number
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 36px system-ui, -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(number), badgeX + badgeSize / 2, badgeY + badgeSize / 2 + 2);
+  
+  // Create texture from canvas
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  
+  return texture;
+}
+
+function getDiceTextureWithNumber(faceValue: number): THREE.Texture | null {
+  const baseTexture = diceTextures.get(faceValue);
+  if (!baseTexture) return null;
+  return createTextureWithNumber(baseTexture, faceValue);
 }
 
 function createDie(index: number): THREE.Mesh<RoundedBoxGeometry, THREE.MeshStandardMaterial[]> {
@@ -767,14 +827,14 @@ function createDie(index: number): THREE.Mesh<RoundedBoxGeometry, THREE.MeshStan
   const geometry = new RoundedBoxGeometry(size, size, size, segments, radius);
 
   // Dice face mapping: [+X, -X, +Y, -Y, +Z, -Z]
-  // We map the dice textures to appropriate faces
+  // We map the dice textures to appropriate faces with number badges
   const materials: THREE.MeshStandardMaterial[] = [
-    new THREE.MeshStandardMaterial({ map: getDiceTexture(4), color: 0xffffff, roughness: 0.3, metalness: 0 }), // +X
-    new THREE.MeshStandardMaterial({ map: getDiceTexture(3), color: 0xffffff, roughness: 0.3, metalness: 0 }), // -X
-    new THREE.MeshStandardMaterial({ map: getDiceTexture(2), color: 0xffffff, roughness: 0.3, metalness: 0 }), // +Y
-    new THREE.MeshStandardMaterial({ map: getDiceTexture(5), color: 0xffffff, roughness: 0.3, metalness: 0 }), // -Y
-    new THREE.MeshStandardMaterial({ map: getDiceTexture(1), color: 0xffffff, roughness: 0.3, metalness: 0 }), // +Z (front)
-    new THREE.MeshStandardMaterial({ map: getDiceTexture(6), color: 0xffffff, roughness: 0.3, metalness: 0 }), // -Z (back)
+    new THREE.MeshStandardMaterial({ map: getDiceTextureWithNumber(4), color: 0xffffff, roughness: 0.3, metalness: 0 }), // +X
+    new THREE.MeshStandardMaterial({ map: getDiceTextureWithNumber(3), color: 0xffffff, roughness: 0.3, metalness: 0 }), // -X
+    new THREE.MeshStandardMaterial({ map: getDiceTextureWithNumber(2), color: 0xffffff, roughness: 0.3, metalness: 0 }), // +Y
+    new THREE.MeshStandardMaterial({ map: getDiceTextureWithNumber(5), color: 0xffffff, roughness: 0.3, metalness: 0 }), // -Y
+    new THREE.MeshStandardMaterial({ map: getDiceTextureWithNumber(1), color: 0xffffff, roughness: 0.3, metalness: 0 }), // +Z (front)
+    new THREE.MeshStandardMaterial({ map: getDiceTextureWithNumber(6), color: 0xffffff, roughness: 0.3, metalness: 0 }), // -Z (back)
   ];
 
   const die = new THREE.Mesh(geometry, materials);
