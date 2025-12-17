@@ -2,26 +2,20 @@
  * Game Configuration
  * Values are loaded from environment variables with sensible defaults
  */
+const backendUrl = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+
 export const GameConfig = {
   // Application title
-  appTitle: import.meta.env.VITE_APP_TITLE || 'Jhandi Munda',
-  
-  // Backend URL for SSE and API
-  backendUrl: import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000',
-  
-  // Chat ID for SSE connection (from URL param or env)
-  chatId: parseInt(
-    new URLSearchParams(window.location.search).get('chatId') || 
-    import.meta.env.VITE_CHAT_ID || 
-    '123',
-    10
-  ),
+  appTitle: 'Jhandi Munda',
+
+  // Backend URL for SSE and API (single-tenant)
+  backendUrl,
   
   // Roll animation duration (ms)
-  rollDuration: parseInt(import.meta.env.VITE_ROLL_DURATION || '2500', 10),
+  rollDuration: 2500,
   
   // Seconds to show result after dice reveal
-  resultDisplayDuration: parseInt(import.meta.env.VITE_RESULT_DISPLAY_DURATION || '5', 10),
+  resultDisplayDuration: 5,
   
   // Target values for each dice (1-6)
   // 1=Spade, 2=Club, 3=Flag, 4=Crown, 5=Heart, 6=Diamond

@@ -37,6 +37,8 @@ interface RoundScheduledEvent {
   chatId: number;
   startAt: number;
   endAt: number;
+  totalMs?: number;
+  remainingMs?: number;
   serverNow: number;
 }
 
@@ -45,6 +47,8 @@ interface RoundStartedEvent {
   chatId: number;
   startAt: number;
   endAt: number;
+  totalMs?: number;
+  remainingMs?: number;
   serverNow: number;
 }
 
@@ -59,6 +63,39 @@ interface RoundCancelledEvent {
   chatId: number;
   serverNow: number;
 }
+
+type SnapshotResponse =
+  | {
+      state: 'SCHEDULED';
+      chatId: number;
+      startAt: number;
+      endAt: number;
+      lastOutcome: { diceValues: number[]; updatedAt: number; roundId: string | null };
+      serverNow: number;
+      totalMs?: number;
+      remainingMs?: number;
+    }
+  | {
+      state: 'STARTED_OR_REVEALED';
+      chatId: number;
+      round: {
+        id: string;
+        name: string | null;
+        startAt: number;
+        endAt: number;
+        diceValues: number[] | null;
+        totalMs?: number;
+        remainingMs?: number;
+      };
+      lastOutcome: { diceValues: number[]; updatedAt: number; roundId: string | null };
+      serverNow: number;
+    }
+  | {
+      state: 'IDLE';
+      chatId: number;
+      lastOutcome: { diceValues: number[]; updatedAt: number; roundId: string | null };
+      serverNow: number;
+    };
 
 // Extend Window interface for global API
 declare global {
@@ -87,11 +124,18 @@ let dice: THREE.Mesh<RoundedBoxGeometry, THREE.MeshStandardMaterial[]>[] = [];
 let rollCount = 0;
 const basePositions: BasePosition[] = [];
 
+// Preloaded textures
+const diceTextures: Map<number, THREE.Texture> = new Map();
+let woodTexture: THREE.Texture | null = null;
+
 // Game state
 let gameState: 'idle' | 'waiting' | 'countdown' | 'rolling' | 'result' = 'idle';
 let scheduledStartAt: number | null = null;
 let scheduledEndAt: number | null = null;
-let countdownAnimationId: number | null = null;
+let countdownHandle: number | null = null;
+let countdownHandleMode: 'raf' | 'timeout' | null = null;
+let countdownTotalMs: number | null = null;
+let cancelledUntil: number | null = null;
 
 // SSE connection
 let eventSource: EventSource | null = null;
@@ -100,6 +144,8 @@ let isConnected = false;
 
 // DOM Elements
 let loadingScreen: HTMLElement;
+let loadingProgress: HTMLElement;
+let loadingText: HTMLElement;
 let gameOverlay: HTMLElement;
 let resultOverlay: HTMLElement;
 let countdownProgress: SVGCircleElement;
@@ -180,7 +226,7 @@ window.reconnect = reconnect;
 // SSE CONNECTION
 // ============================================
 function connectSSE(): void {
-  const url = `${GameConfig.backendUrl}/sse?chatId=${GameConfig.chatId}`;
+  const url = `${GameConfig.backendUrl}/sse`;
   console.log(`[SSE] Connecting to ${url}`);
   updateConnectionStatus(false, 'Connecting...');
 
@@ -190,6 +236,8 @@ function connectSSE(): void {
     console.log('[SSE] Connection opened');
     reconnectAttempts = 0;
     updateConnectionStatus(true);
+    // Refresh state on reconnect/open to catch up with missed events.
+    fetchSnapshotAndSync();
   };
 
   eventSource.onerror = (error) => {
@@ -225,11 +273,12 @@ function connectSSE(): void {
     console.log('[SSE] round.scheduled:', data);
     
     updateServerTimeOffset(data.serverNow);
+    cancelledUntil = null;
     scheduledStartAt = data.startAt;
     scheduledEndAt = data.endAt;
     
     // Start countdown to startAt
-    startScheduledCountdown();
+    startScheduledCountdown(data.totalMs, data.remainingMs);
   });
 
   // Handle round.started event
@@ -238,12 +287,13 @@ function connectSSE(): void {
     console.log('[SSE] round.started:', data);
     
     updateServerTimeOffset(data.serverNow);
+    cancelledUntil = null;
     GameConfig.currentRoundId = data.roundId;
     scheduledStartAt = data.startAt;
     scheduledEndAt = data.endAt;
     
     // Transition to waiting for result (countdown to endAt)
-    startRoundCountdown();
+    startRoundCountdown(data.totalMs, data.remainingMs);
   });
 
   // Handle round.result event
@@ -265,10 +315,14 @@ function connectSSE(): void {
     console.log('[SSE] round.cancelled:', data);
     
     updateServerTimeOffset(data.serverNow);
+    // Block countdown restarts until the current round window ends (best effort).
+    const now = getServerTime();
+    const horizon = scheduledEndAt ?? scheduledStartAt ?? now + 30000;
+    cancelledUntil = horizon;
     
     // Cancel any ongoing countdown
     cancelCountdown();
-    showWaitingState('Round cancelled');
+    showWaitingState('Waiting for next round...');
   });
 }
 
@@ -293,9 +347,20 @@ function scheduleReconnect(): void {
 // GAME LOOP - BACKEND DRIVEN
 // ============================================
 
-function startScheduledCountdown(): void {
+function startScheduledCountdown(totalMs?: number, remainingMs?: number): void {
   if (!scheduledStartAt) return;
   
+  // If we recently cancelled and are still within the cancelled window, do not restart.
+  if (cancelledUntil && getServerTime() < cancelledUntil) {
+    showWaitingState('Waiting for next round...');
+    return;
+  }
+
+  const remaining = remainingMs ?? Math.max(0, scheduledStartAt - getServerTime());
+  const total = Math.max(1, totalMs ?? countdownTotalMs ?? remaining);
+  countdownTotalMs = total;
+  const targetTime = getServerTime() + remaining;
+
   gameState = 'countdown';
   
   // Show overlay
@@ -304,12 +369,23 @@ function startScheduledCountdown(): void {
   statusText.textContent = 'Round starting soon...';
   
   // Start countdown animation to startAt
-  animateCountdownToTime(scheduledStartAt, 'Round starting in');
+  animateCountdownToTime(targetTime, 'Round starting in', total);
 }
 
-function startRoundCountdown(): void {
+function startRoundCountdown(totalMs?: number, remainingMs?: number): void {
   if (!scheduledEndAt) return;
   
+  // If we recently cancelled and are still within the cancelled window, do not restart.
+  if (cancelledUntil && getServerTime() < cancelledUntil) {
+    showWaitingState('Waiting for next round...');
+    return;
+  }
+
+  const remaining = remainingMs ?? Math.max(0, scheduledEndAt - getServerTime());
+  const total = Math.max(1, totalMs ?? countdownTotalMs ?? remaining);
+  countdownTotalMs = total;
+  const targetTime = getServerTime() + remaining;
+
   gameState = 'countdown';
   
   // Show overlay
@@ -318,28 +394,31 @@ function startRoundCountdown(): void {
   statusText.textContent = 'Rolling soon...';
   
   // Start countdown animation to endAt (when result will be revealed)
-  animateCountdownToTime(scheduledEndAt, 'Result in');
+  animateCountdownToTime(targetTime, 'Result in', total);
 }
 
-function animateCountdownToTime(targetTime: number, label: string): void {
+function animateCountdownToTime(targetTime: number, label: string, totalDuration?: number): void {
   const now = getServerTime();
-  const totalDuration = targetTime - now;
   const remaining = Math.max(0, targetTime - getServerTime());
+  // Preserve the original duration so progress uses a stable denominator, and never let it be less than remaining
+  const baseDuration = totalDuration ?? targetTime - now;
+  const duration = Math.max(1, Math.max(baseDuration, remaining));
   
   // Calculate progress (0 = just started, 1 = finished)
-  const progress = 1 - (remaining / Math.max(totalDuration, 1));
+  const progress = 1 - remaining / duration;
   
   // Update circular progress (smooth)
   const circumference = 283; // 2 * PI * 45
   const offset = circumference * progress;
-  countdownProgress.style.strokeDashoffset = String(circumference - offset);
+  // Start full (0) and decrease toward circumference
+  countdownProgress.style.strokeDashoffset = String(offset);
   
   // Update countdown number
   const secondsLeft = Math.ceil(remaining / 1000);
   countdownText.textContent = String(Math.max(0, secondsLeft));
   
   // Color transition
-  const remainingRatio = remaining / totalDuration;
+  const remainingRatio = remaining / duration;
   if (remainingRatio > 0.5) {
     countdownProgress.style.stroke = '#4ade80'; // Green
   } else if (remainingRatio > 0.25) {
@@ -356,9 +435,9 @@ function animateCountdownToTime(targetTime: number, label: string): void {
   }
   
   if (remaining > 0) {
-    countdownAnimationId = requestAnimationFrame(() => animateCountdownToTime(targetTime, label));
+    queueCountdownFrame(targetTime, label, duration);
   } else {
-    countdownAnimationId = null;
+    clearCountdownFrame();
     // Wait for round.result event - show waiting state
     if (gameState === 'countdown') {
       showWaitingState('Waiting for result...');
@@ -366,19 +445,41 @@ function animateCountdownToTime(targetTime: number, label: string): void {
   }
 }
 
-function cancelCountdown(): void {
-  if (countdownAnimationId) {
-    cancelAnimationFrame(countdownAnimationId);
-    countdownAnimationId = null;
+function queueCountdownFrame(targetTime: number, label: string, totalDuration: number) {
+  clearCountdownFrame();
+  if (document.hidden) {
+    countdownHandleMode = 'timeout';
+    countdownHandle = window.setTimeout(() => animateCountdownToTime(targetTime, label, totalDuration), 100);
+  } else {
+    countdownHandleMode = 'raf';
+    countdownHandle = requestAnimationFrame(() => animateCountdownToTime(targetTime, label, totalDuration));
   }
+}
+
+function clearCountdownFrame(): void {
+  if (countdownHandle !== null) {
+    if (countdownHandleMode === 'raf') {
+      cancelAnimationFrame(countdownHandle);
+    } else {
+      clearTimeout(countdownHandle);
+    }
+  }
+  countdownHandle = null;
+  countdownHandleMode = null;
+}
+
+function cancelCountdown(): void {
+  clearCountdownFrame();
   scheduledStartAt = null;
   scheduledEndAt = null;
+  countdownTotalMs = null;
 }
 
 function showWaitingState(message: string): void {
   gameState = 'waiting';
   gameOverlay.classList.remove('hidden');
   resultOverlay.classList.remove('visible');
+  countdownTotalMs = null;
   
   // Reset countdown display
   countdownProgress.style.strokeDashoffset = '0';
@@ -455,12 +556,18 @@ function buildResultSymbols(diceValues: number[]): void {
   resultSymbols.innerHTML = '';
   for (let i = 0; i < 6; i++) {
     const value = diceValues[i];
-    const symbolData = symbols[value];
     
-    if (symbolData) {
+    if (value >= 1 && value <= 6) {
       const div = document.createElement('div');
       div.className = 'result-symbol';
-      div.textContent = symbolData.char;
+      
+      // Use actual dice images
+      const img = document.createElement('img');
+      img.src = `/Dice_side_${value}.0.png`;
+      img.alt = symbols[value]?.name || `Dice ${value}`;
+      img.className = 'result-symbol-img';
+      div.appendChild(img);
+      
       resultSymbols.appendChild(div);
     }
   }
@@ -479,6 +586,86 @@ function updateDiceToValues(values: number[]): void {
 }
 
 // ============================================
+// ASSET PRELOADING
+// ============================================
+
+interface LoadProgress {
+  loaded: number;
+  total: number;
+}
+
+function updateLoadingProgress(progress: LoadProgress): void {
+  const percent = Math.round((progress.loaded / progress.total) * 100);
+  if (loadingProgress) {
+    loadingProgress.style.width = `${percent}%`;
+  }
+  if (loadingText) {
+    loadingText.textContent = `Loading assets... ${percent}%`;
+  }
+}
+
+function preloadAssets(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const textureLoader = new THREE.TextureLoader();
+    
+    // Assets to load: 6 dice faces + wood texture
+    const assetPaths = [
+      { path: '/Dice_side_1.0.png', type: 'dice', value: 1 },
+      { path: '/Dice_side_2.0.png', type: 'dice', value: 2 },
+      { path: '/Dice_side_3.0.png', type: 'dice', value: 3 },
+      { path: '/Dice_side_4.0.png', type: 'dice', value: 4 },
+      { path: '/Dice_side_5.0.png', type: 'dice', value: 5 },
+      { path: '/Dice_side_6.0.png', type: 'dice', value: 6 },
+      { path: '/woodtexture.png', type: 'background', value: 0 },
+    ];
+    
+    const total = assetPaths.length;
+    let loaded = 0;
+    let hasError = false;
+    
+    updateLoadingProgress({ loaded: 0, total });
+    
+    const onAssetLoaded = () => {
+      loaded++;
+      updateLoadingProgress({ loaded, total });
+      
+      if (loaded === total && !hasError) {
+        // Small delay for smooth transition
+        setTimeout(resolve, 300);
+      }
+    };
+    
+    const onAssetError = (path: string) => (error: unknown) => {
+      hasError = true;
+      console.error(`Failed to load asset: ${path}`, error);
+      reject(new Error(`Failed to load: ${path}`));
+    };
+    
+    assetPaths.forEach((asset) => {
+      textureLoader.load(
+        asset.path,
+        (texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.generateMipmaps = true;
+          texture.minFilter = THREE.LinearMipmapLinearFilter;
+          texture.magFilter = THREE.LinearFilter;
+          
+          if (asset.type === 'dice') {
+            diceTextures.set(asset.value, texture);
+          } else if (asset.type === 'background') {
+            woodTexture = texture;
+          }
+          
+          onAssetLoaded();
+        },
+        undefined,
+        onAssetError(asset.path)
+      );
+    });
+  });
+}
+
+// ============================================
 // THREE.JS SETUP
 // ============================================
 
@@ -486,9 +673,11 @@ function hideLoadingScreen(): void {
   loadingScreen.classList.add('hidden');
 }
 
-function init(): void {
+async function init(): Promise<void> {
   // Get DOM elements
   loadingScreen = document.getElementById('loadingScreen')!;
+  loadingProgress = loadingScreen.querySelector('.loading-progress')!;
+  loadingText = loadingScreen.querySelector('.loading-text')!;
   gameOverlay = document.getElementById('gameOverlay')!;
   resultOverlay = document.getElementById('resultOverlay')!;
   countdownProgress = document.getElementById('countdownProgress') as unknown as SVGCircleElement;
@@ -501,99 +690,70 @@ function init(): void {
   // Initialize Bhutan clock
   initClock();
 
-  // Scene
-  scene = new THREE.Scene();
-  
-  // Load wood texture as background
-  const textureLoader = new THREE.TextureLoader();
-  textureLoader.load('/woodtexture.png', (texture) => {
-    texture.colorSpace = THREE.SRGBColorSpace;
-    scene.background = texture;
-  });
+  try {
+    // Preload all assets before starting the game
+    await preloadAssets();
+    
+    // Scene
+    scene = new THREE.Scene();
+    
+    // Use preloaded wood texture as background
+    if (woodTexture) {
+      scene.background = woodTexture;
+    }
 
-  const aspect = window.innerWidth / window.innerHeight;
-  camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 1000);
-  updateCameraPosition();
+    const aspect = window.innerWidth / window.innerHeight;
+    camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 1000);
+    updateCameraPosition();
 
-  const canvas = document.getElementById('dice-canvas') as HTMLCanvasElement;
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
+    const canvas = document.getElementById('dice-canvas') as HTMLCanvasElement;
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-  // Lighting
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-  scene.add(ambientLight);
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+    scene.add(ambientLight);
 
-  const mainLight = new THREE.DirectionalLight(0xffffff, 1.0);
-  mainLight.position.set(5, 10, 8);
-  mainLight.castShadow = true;
-  scene.add(mainLight);
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    mainLight.position.set(5, 10, 8);
+    mainLight.castShadow = true;
+    scene.add(mainLight);
 
-  const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
-  fillLight.position.set(-5, 5, -5);
-  scene.add(fillLight);
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    fillLight.position.set(-5, 5, -5);
+    scene.add(fillLight);
 
-  const frontLight = new THREE.DirectionalLight(0xffffff, 0.4);
-  frontLight.position.set(0, 0, 10);
-  scene.add(frontLight);
+    const frontLight = new THREE.DirectionalLight(0xffffff, 0.4);
+    frontLight.position.set(0, 0, 10);
+    scene.add(frontLight);
 
-  createDice();
-  animate();
+    createDice();
+    animate();
 
-  window.addEventListener('resize', onWindowResize);
+    window.addEventListener('resize', onWindowResize);
 
-  // Hide loading screen and connect to SSE
-  requestAnimationFrame(() => {
+    // Hide loading screen and connect to SSE
     hideLoadingScreen();
     
     // Connect to backend SSE after loading
     setTimeout(() => {
       connectSSE();
     }, 500);
-  });
+    
+  } catch (error) {
+    console.error('Failed to initialize game:', error);
+    if (loadingText) {
+      loadingText.textContent = 'Failed to load assets. Please refresh.';
+    }
+  }
 }
 
-function createFaceTexture(symbolKey: number): THREE.CanvasTexture | null {
-  const size = 1024;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0, 0, size, size);
-
-  const symbol = symbols[symbolKey];
-  if (!symbol) return null;
-
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = symbol.color;
-
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.15)';
-  ctx.shadowBlur = 12;
-  ctx.shadowOffsetX = 4;
-  ctx.shadowOffsetY = 4;
-
-  if (symbol.isEmoji) {
-    ctx.font = '500px Arial';
-  } else {
-    ctx.font = 'bold 580px Arial';
-  }
-
-  ctx.fillText(symbol.char, size / 2, size / 2 + 30);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.generateMipmaps = true;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.needsUpdate = true;
-
-  return texture;
+function getDiceTexture(faceValue: number): THREE.Texture | null {
+  return diceTextures.get(faceValue) || null;
 }
 
 function createDie(index: number): THREE.Mesh<RoundedBoxGeometry, THREE.MeshStandardMaterial[]> {
@@ -603,13 +763,15 @@ function createDie(index: number): THREE.Mesh<RoundedBoxGeometry, THREE.MeshStan
 
   const geometry = new RoundedBoxGeometry(size, size, size, segments, radius);
 
+  // Dice face mapping: [+X, -X, +Y, -Y, +Z, -Z]
+  // We map the dice textures to appropriate faces
   const materials: THREE.MeshStandardMaterial[] = [
-    new THREE.MeshStandardMaterial({ map: createFaceTexture(4), color: 0xffffff, roughness: 1, metalness: 0 }),
-    new THREE.MeshStandardMaterial({ map: createFaceTexture(3), color: 0xffffff, roughness: 0.25, metalness: 0 }),
-    new THREE.MeshStandardMaterial({ map: createFaceTexture(2), color: 0xffffff, roughness: 0.25, metalness: 0 }),
-    new THREE.MeshStandardMaterial({ map: createFaceTexture(5), color: 0xffffff, roughness: 0.25, metalness: 0 }),
-    new THREE.MeshStandardMaterial({ map: createFaceTexture(1), color: 0xffffff, roughness: 0.25, metalness: 0 }),
-    new THREE.MeshStandardMaterial({ map: createFaceTexture(6), color: 0xffffff, roughness: 0.25, metalness: 0 }),
+    new THREE.MeshStandardMaterial({ map: getDiceTexture(4), color: 0xffffff, roughness: 0.3, metalness: 0 }), // +X
+    new THREE.MeshStandardMaterial({ map: getDiceTexture(3), color: 0xffffff, roughness: 0.3, metalness: 0 }), // -X
+    new THREE.MeshStandardMaterial({ map: getDiceTexture(2), color: 0xffffff, roughness: 0.3, metalness: 0 }), // +Y
+    new THREE.MeshStandardMaterial({ map: getDiceTexture(5), color: 0xffffff, roughness: 0.3, metalness: 0 }), // -Y
+    new THREE.MeshStandardMaterial({ map: getDiceTexture(1), color: 0xffffff, roughness: 0.3, metalness: 0 }), // +Z (front)
+    new THREE.MeshStandardMaterial({ map: getDiceTexture(6), color: 0xffffff, roughness: 0.3, metalness: 0 }), // -Z (back)
   ];
 
   const die = new THREE.Mesh(geometry, materials);
@@ -625,14 +787,16 @@ function createDie(index: number): THREE.Mesh<RoundedBoxGeometry, THREE.MeshStan
 }
 
 function createDice(): void {
-  const spacing = 2.5;
+  const spacing = 3.2;
+  // Slight upward shift to keep dice centered on desktop
+  const yOffset = 0.2;
   const positions = [
-    { x: -spacing / 2, y: spacing },
-    { x: spacing / 2, y: spacing },
-    { x: -spacing / 2, y: 0 },
-    { x: spacing / 2, y: 0 },
-    { x: -spacing / 2, y: -spacing },
-    { x: spacing / 2, y: -spacing },
+    { x: -spacing / 2, y: spacing + yOffset },
+    { x: spacing / 2, y: spacing + yOffset },
+    { x: -spacing / 2, y: 0 + yOffset },
+    { x: spacing / 2, y: 0 + yOffset },
+    { x: -spacing / 2, y: -spacing + yOffset },
+    { x: spacing / 2, y: -spacing + yOffset },
   ];
 
   for (let i = 0; i < 6; i++) {
@@ -743,11 +907,101 @@ function rollAllDice(): void {
 // EVENT HANDLERS
 // ============================================
 
+async function fetchSnapshotAndSync() {
+  try {
+    const res = await fetch(`${GameConfig.backendUrl}/rounds/current`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`Snapshot failed: ${res.status}`);
+    const data: SnapshotResponse = await res.json();
+    updateServerTimeOffset(data.serverNow);
+    const now = data.serverNow;
+
+    // Always update last outcome and dice
+    GameConfig.targetValues = data.lastOutcome.diceValues;
+    GameConfig.currentRoundId = data.lastOutcome.roundId;
+    updateDiceToValues(GameConfig.targetValues);
+
+    if (data.state === 'SCHEDULED') {
+      if (cancelledUntil && now < cancelledUntil) {
+        cancelCountdown();
+        showWaitingState('Waiting for next round...');
+        return;
+      }
+      scheduledStartAt = data.startAt;
+      scheduledEndAt = data.endAt;
+      const totalMs = data.totalMs;
+      const remainingMs = data.remainingMs ?? Math.max(0, data.startAt - now);
+      // If schedule already passed, fall back to waiting/result states.
+      if (now >= data.endAt) {
+        showLastOutcome(GameConfig.targetValues);
+      } else if (now >= data.startAt) {
+        startRoundCountdown(data.totalMs ?? data.endAt - data.startAt, Math.max(0, data.endAt - now));
+      } else {
+        startScheduledCountdown(totalMs ?? remainingMs, remainingMs);
+      }
+    } else if (data.state === 'STARTED_OR_REVEALED') {
+      if (cancelledUntil && now < cancelledUntil) {
+        cancelCountdown();
+        showWaitingState('Round cancelled');
+        return;
+      }
+      scheduledStartAt = data.round.startAt;
+      scheduledEndAt = data.round.endAt;
+      GameConfig.currentRoundId = data.round.id;
+
+      if (Array.isArray(data.round.diceValues)) {
+        const isCancelledResult = data.round.diceValues.length === 0;
+        if (isCancelledResult) {
+          // Cancelled round: stop timers and show waiting state
+          cancelCountdown();
+          showWaitingState('Waiting for next round...');
+          showWaitingState('Waiting for next round...');
+        } else {
+          // Round has a result already.
+          GameConfig.targetValues = data.round.diceValues;
+          updateDiceToValues(GameConfig.targetValues);
+          if (now >= data.round.endAt) {
+            // Round already finished; show result without re-rolling.
+            showResult(GameConfig.targetValues);
+          } else {
+            // Round in progress; animate roll to reveal.
+            startRolling(GameConfig.targetValues);
+          }
+        }
+      } else {
+        // No result yet
+        if (now < data.round.endAt) {
+          startRoundCountdown(
+            data.round.totalMs ?? data.round.endAt - data.round.startAt,
+            data.round.remainingMs ?? Math.max(0, data.round.endAt - now),
+          );
+        } else {
+          showWaitingState('Waiting for result...');
+        }
+      }
+    } else {
+      // IDLE: show last outcome
+      showLastOutcome(GameConfig.targetValues);
+    }
+  } catch (err) {
+    console.error('[Snapshot] Failed to sync', err);
+  }
+}
+
 function onWindowResize(): void {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   updateCameraPosition();
+}
+
+function onVisibilityChange(): void {
+  if (!document.hidden) {
+    // Tab became active: resync with backend to catch missed events and restart countdown timers.
+    fetchSnapshotAndSync();
+  } else {
+    // Stop countdown timers while hidden to avoid drift; they will be restarted on resync.
+    clearCountdownFrame();
+  }
 }
 
 function updateCameraPosition(): void {
@@ -771,3 +1025,4 @@ function animate(): void {
 
 // Start
 init();
+document.addEventListener('visibilitychange', onVisibilityChange);
