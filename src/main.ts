@@ -136,6 +136,9 @@ let countdownHandle: number | null = null;
 let countdownHandleMode: 'raf' | 'timeout' | null = null;
 let countdownTotalMs: number | null = null;
 let cancelledUntil: number | null = null;
+let waitingStateTimeout: number | null = null;
+let isFetchingSnapshot = false;
+let timeSyncInterval: number | null = null;
 
 // SSE connection
 let eventSource: EventSource | null = null;
@@ -185,6 +188,33 @@ function getServerTime(): number {
 function updateServerTimeOffset(serverNow: number): void {
   // Calculate offset between server and client time
   GameConfig.serverTimeOffset = serverNow - Date.now();
+}
+
+function startPeriodicTimeSync(): void {
+  // Clear existing interval if any
+  if (timeSyncInterval !== null) {
+    clearInterval(timeSyncInterval);
+  }
+  
+  // Sync time every 30 seconds to prevent drift
+  timeSyncInterval = window.setInterval(async () => {
+    try {
+      const res = await fetch(`${GameConfig.backendUrl}/rounds/current`, { cache: 'no-store' });
+      if (res.ok) {
+        const data: SnapshotResponse = await res.json();
+        updateServerTimeOffset(data.serverNow);
+      }
+    } catch (err) {
+      console.error('[TimeSync] Failed to sync time', err);
+    }
+  }, 30000);
+}
+
+function stopPeriodicTimeSync(): void {
+  if (timeSyncInterval !== null) {
+    clearInterval(timeSyncInterval);
+    timeSyncInterval = null;
+  }
 }
 
 // ============================================
@@ -238,6 +268,8 @@ function connectSSE(): void {
     updateConnectionStatus(true);
     // Refresh state on reconnect/open to catch up with missed events.
     fetchSnapshotAndSync();
+    // Start periodic time sync to prevent drift (every 30 seconds)
+    startPeriodicTimeSync();
   };
 
   eventSource.onerror = (error) => {
@@ -251,7 +283,13 @@ function connectSSE(): void {
 
   // Handle last.outcome event
   eventSource.addEventListener('last.outcome', (event: MessageEvent) => {
-    const data: LastOutcomeEvent = JSON.parse(event.data);
+    let data: LastOutcomeEvent;
+    try {
+      data = JSON.parse(event.data);
+    } catch (err) {
+      console.error('[SSE] Failed to parse last.outcome event:', err);
+      return;
+    }
     console.log('[SSE] last.outcome:', data);
     
     updateServerTimeOffset(data.serverNow);
@@ -261,15 +299,22 @@ function connectSSE(): void {
     // Update dice to show last outcome and display result overlay
     updateDiceToValues(data.diceValues);
     
-    // Show last result on connect (if not already in a round)
-    if (gameState === 'idle' || gameState === 'waiting') {
+    // Show last result on connect (if not already in a round or countdown)
+    // Don't show if we're in countdown state (waiting for round.result)
+    if (gameState === 'idle' || (gameState === 'waiting' && !scheduledEndAt)) {
       showLastOutcome(data.diceValues);
     }
   });
 
   // Handle round.scheduled event
   eventSource.addEventListener('round.scheduled', (event: MessageEvent) => {
-    const data: RoundScheduledEvent = JSON.parse(event.data);
+    let data: RoundScheduledEvent;
+    try {
+      data = JSON.parse(event.data);
+    } catch (err) {
+      console.error('[SSE] Failed to parse round.scheduled event:', err);
+      return;
+    }
     console.log('[SSE] round.scheduled:', data);
     
     updateServerTimeOffset(data.serverNow);
@@ -283,7 +328,13 @@ function connectSSE(): void {
 
   // Handle round.started event
   eventSource.addEventListener('round.started', (event: MessageEvent) => {
-    const data: RoundStartedEvent = JSON.parse(event.data);
+    let data: RoundStartedEvent;
+    try {
+      data = JSON.parse(event.data);
+    } catch (err) {
+      console.error('[SSE] Failed to parse round.started event:', err);
+      return;
+    }
     console.log('[SSE] round.started:', data);
     
     updateServerTimeOffset(data.serverNow);
@@ -292,18 +343,30 @@ function connectSSE(): void {
     scheduledStartAt = data.startAt;
     scheduledEndAt = data.endAt;
     
+    // Cancel any previous countdown before starting the round countdown
+    cancelCountdown();
+    
     // Transition to waiting for result (countdown to endAt)
     startRoundCountdown(data.totalMs, data.remainingMs);
   });
 
   // Handle round.result event
   eventSource.addEventListener('round.result', (event: MessageEvent) => {
-    const data: RoundResultEvent = JSON.parse(event.data);
+    let data: RoundResultEvent;
+    try {
+      data = JSON.parse(event.data);
+    } catch (err) {
+      console.error('[SSE] Failed to parse round.result event:', err);
+      return;
+    }
     console.log('[SSE] round.result:', data);
     
     updateServerTimeOffset(data.serverNow);
     GameConfig.targetValues = data.diceValues;
     GameConfig.currentRoundId = data.roundId;
+    
+    // Cancel any ongoing countdown before starting the roll
+    cancelCountdown();
     
     // Roll dice to show result
     startRolling(data.diceValues);
@@ -311,7 +374,13 @@ function connectSSE(): void {
 
   // Handle round.cancelled event
   eventSource.addEventListener('round.cancelled', (event: MessageEvent) => {
-    const data: RoundCancelledEvent = JSON.parse(event.data);
+    let data: RoundCancelledEvent;
+    try {
+      data = JSON.parse(event.data);
+    } catch (err) {
+      console.error('[SSE] Failed to parse round.cancelled event:', err);
+      return;
+    }
     console.log('[SSE] round.cancelled:', data);
     
     updateServerTimeOffset(data.serverNow);
@@ -380,6 +449,9 @@ function startRoundCountdown(totalMs?: number, remainingMs?: number): void {
     showWaitingState('Waiting for next round...');
     return;
   }
+
+  // Cancel any existing countdown before starting a new one
+  clearCountdownFrame();
 
   const remaining = remainingMs ?? Math.max(0, scheduledEndAt - getServerTime());
   const total = Math.max(1, totalMs ?? countdownTotalMs ?? remaining);
@@ -470,12 +542,23 @@ function clearCountdownFrame(): void {
 
 function cancelCountdown(): void {
   clearCountdownFrame();
-  scheduledStartAt = null;
-  scheduledEndAt = null;
+  // Clear waiting state timeout as well
+  if (waitingStateTimeout !== null) {
+    clearTimeout(waitingStateTimeout);
+    waitingStateTimeout = null;
+  }
+  // Don't clear scheduledStartAt and scheduledEndAt - they're needed for round timing
+  // Only clear countdown-specific state
   countdownTotalMs = null;
 }
 
 function showWaitingState(message: string): void {
+  // Clear any existing waiting state timeout
+  if (waitingStateTimeout !== null) {
+    clearTimeout(waitingStateTimeout);
+    waitingStateTimeout = null;
+  }
+  
   gameState = 'waiting';
   gameOverlay.classList.remove('hidden');
   resultOverlay.classList.remove('visible');
@@ -487,17 +570,33 @@ function showWaitingState(message: string): void {
   countdownText.textContent = '...';
   statusText.textContent = message;
   
-  // After a short delay, show the last result
-  setTimeout(() => {
-    if (gameState === 'waiting') {
-      gameOverlay.classList.add('hidden');
-      // Show the last outcome result
-      showLastOutcome(GameConfig.targetValues);
-    }
-  }, 2000);
+  // Only auto-show last result if we're not waiting for an active round result
+  // If scheduledEndAt is set, we're in an active round and should wait for round.result event
+  const isWaitingForActiveRound = scheduledEndAt && getServerTime() < scheduledEndAt;
+  
+  if (!isWaitingForActiveRound) {
+    // After a short delay, show the last result (only if not in an active round)
+    waitingStateTimeout = window.setTimeout(() => {
+      waitingStateTimeout = null;
+      if (gameState === 'waiting' && !(scheduledEndAt && getServerTime() < scheduledEndAt)) {
+        gameOverlay.classList.add('hidden');
+        // Show the last outcome result
+        showLastOutcome(GameConfig.targetValues);
+      }
+    }, 2000);
+  }
 }
 
 function startRolling(diceValues: number[]): void {
+  // Cancel any ongoing countdown before starting the roll
+  cancelCountdown();
+  
+  // Clear any waiting state timeout to prevent it from showing result prematurely
+  if (waitingStateTimeout !== null) {
+    clearTimeout(waitingStateTimeout);
+    waitingStateTimeout = null;
+  }
+  
   gameState = 'rolling';
   gameOverlay.classList.add('hidden');
   resultOverlay.classList.remove('visible');
@@ -971,6 +1070,13 @@ function rollAllDice(): void {
 // ============================================
 
 async function fetchSnapshotAndSync() {
+  // Prevent concurrent calls
+  if (isFetchingSnapshot) {
+    console.log('[Snapshot] Already fetching, skipping concurrent call');
+    return;
+  }
+  
+  isFetchingSnapshot = true;
   try {
     const res = await fetch(`${GameConfig.backendUrl}/rounds/current`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`Snapshot failed: ${res.status}`);
@@ -1017,7 +1123,6 @@ async function fetchSnapshotAndSync() {
           // Cancelled round: stop timers and show waiting state
           cancelCountdown();
           showWaitingState('Waiting for next round...');
-          showWaitingState('Waiting for next round...');
         } else {
           // Round has a result already.
           GameConfig.targetValues = data.round.diceValues;
@@ -1047,6 +1152,8 @@ async function fetchSnapshotAndSync() {
     }
   } catch (err) {
     console.error('[Snapshot] Failed to sync', err);
+  } finally {
+    isFetchingSnapshot = false;
   }
 }
 
@@ -1089,3 +1196,13 @@ function animate(): void {
 // Start
 init();
 document.addEventListener('visibilitychange', onVisibilityChange);
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+  stopPeriodicTimeSync();
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
+  cancelCountdown();
+});
