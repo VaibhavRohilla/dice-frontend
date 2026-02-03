@@ -22,6 +22,23 @@
     <meta name="twitter:image" content="https://jhandimundalive.netlify.app/preview.png">
     
     <link rel="icon" type="image/svg+xml" href="/vite.svg">
+
+    <!-- Performance: preconnect + font stylesheet (replaces CSS @import) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;700;800&display=swap"
+    >
+
+    <!-- Performance: preload heavy background & dice images -->
+    <link rel="preload" as="image" href="/woodtexture.png">
+    <link rel="preload" as="image" href="/Dice_side_1.0.png">
+    <link rel="preload" as="image" href="/Dice_side_2.0.png">
+    <link rel="preload" as="image" href="/Dice_side_3.0.png">
+    <link rel="preload" as="image" href="/Dice_side_4.0.png">
+    <link rel="preload" as="image" href="/Dice_side_5.0.png">
+    <link rel="preload" as="image" href="/Dice_side_6.0.png">
     
     <!-- Critical CSS - Prevents white flash -->
     <style>
